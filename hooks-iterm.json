@@ -1,0 +1,25 @@
+{
+  "_note": "iTerm hook configs. To re-enable, copy these entries into the hooks section of settings.json.",
+  "Notification": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "$HOME/.claude/hooks/notify-iterm.sh"
+        }
+      ]
+    }
+  ],
+  "PermissionRequest": [
+    {
+      "matcher": "",
+      "hooks": [
+        {
+          "type": "command",
+          "command": "$HOME/.claude/hooks/notify-iterm.sh"
+        }
+      ]
+    }
+  ]
+}
