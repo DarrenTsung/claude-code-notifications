@@ -10,16 +10,5 @@
         }
       ]
     }
-  ],
-  "PermissionRequest": [
-    {
-      "matcher": "",
-      "hooks": [
-        {
-          "type": "command",
-          "command": "$HOME/.claude/hooks/notify-iterm.sh"
-        }
-      ]
-    }
   ]
 }

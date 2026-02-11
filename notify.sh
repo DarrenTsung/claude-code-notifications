@@ -5,8 +5,15 @@
 INPUT=$(cat)
 
 # Parse fields using jq
+HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // ""')
 NOTIFICATION_TYPE=$(echo "$INPUT" | jq -r '.notification_type // "unknown"')
 MESSAGE=$(echo "$INPUT" | jq -r '.message // ""')
+
+# Skip PermissionRequest events — Claude Code always follows them with a
+# Notification event that has proper notification_type and message.
+if [[ "$HOOK_EVENT" == "PermissionRequest" ]]; then
+  exit 0
+fi
 
 ACTIVATE_SCRIPT="$HOME/.claude/hooks/activate-warp-session.sh"
 TITLE="Claude Code"
