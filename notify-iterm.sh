@@ -81,11 +81,28 @@ fi
 
 case "$NOTIFICATION_TYPE" in
   "idle_prompt")
-    # Claude is waiting for user input
+    # Classify the last assistant message to decide if notification is warranted
+    TRANSCRIPT_PATH=$(echo "$INPUT" | jq -r '.transcript_path // ""')
+    CLASSIFY_SCRIPT="$HOME/.claude/hooks/classify-notification.sh"
+
+    if [[ -x "$CLASSIFY_SCRIPT" ]]; then
+      RESULT=$("$CLASSIFY_SCRIPT" "$TRANSCRIPT_PATH")
+      SHOULD_NOTIFY=$(echo "$RESULT" | jq -r '.notify')
+      if [[ "$SHOULD_NOTIFY" == "false" ]]; then
+        echo "$(date -Iseconds) SKIPPED idle_prompt (classified as routine)" >> /tmp/claude-notify-debug.log
+        exit 0
+      fi
+      SUBTITLE=$(echo "$RESULT" | jq -r '.subtitle // "Needs Input"')
+      SUMMARY=$(echo "$RESULT" | jq -r '.summary // "Awaiting your input"')
+    else
+      SUBTITLE="Needs Input"
+      SUMMARY="${MESSAGE:-Awaiting your input}"
+    fi
+
     terminal-notifier \
       -title "$TITLE" \
-      -subtitle "Needs Input" \
-      -message "${MESSAGE:-Awaiting your input}" \
+      -subtitle "$SUBTITLE" \
+      -message "$SUMMARY" \
       -sound Blow \
       -execute "$ACTIVATE_SCRIPT $SESSION_ID"
     ;;

@@ -11,6 +11,7 @@ mkdir -p "$HOOKS_DIR"
 SCRIPTS=(
   activate-iterm-session.sh
   activate-warp-session.sh
+  classify-notification.sh
   notify-iterm.sh
   notify.sh
   track-user-focus-iterm.sh
