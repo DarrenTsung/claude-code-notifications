@@ -51,6 +51,7 @@ NOTIFY = false when Claude:
 - Ran a routine git/CLI operation (committed, pushed, created a PR, merged, rebased)
 - Confirmed a trivial action (saved a file, deleted a file, ran a formatter)
 - Gave a brief status acknowledgment with no meaningful content
+- Is still working and waiting for sub-tasks/agents to complete (e.g. "waiting for agents", "running in parallel", "checking on results")
 
 For subtitle, use short labels like: "Question", "Feature Done", "Error Found", "Analysis Ready", "Bug Fixed", "Review Ready"
 For summary, write naturally and concisely. Describe the outcome or question directly. Do not start with "Claude".'

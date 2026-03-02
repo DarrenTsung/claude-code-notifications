@@ -71,6 +71,14 @@ classify "Simple confirmation" \
   'Done. The file has been saved.' \
   false
 
+classify "Waiting for sub-agents" \
+  'Two answer agents running in parallel:
+  1. ML job triggers — investigating what caused mlFileChunksIndexJob (+30%) and fileAnalyzerJob (3x) volume changes via Statsig, LaunchDarkly, and code
+  2. Metrics verification — checking whether the Statsig gate increased overflow rate, and whether the Feb 27 fixes resolved the regression
+
+  Waiting for both to complete.' \
+  false
+
 # --- Should notify (questions) ---
 
 classify "Asking a question" \
