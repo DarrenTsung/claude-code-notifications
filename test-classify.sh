@@ -103,6 +103,37 @@ classify "Error encountered" \
   'I ran into an error trying to build the project. The TypeScript compiler is reporting 12 type errors in the auth module, mostly related to the new User type missing the `refreshToken` field.' \
   true
 
+classify "Investigation with options to choose" \
+  'Check-in: Major discovery — both leading hypotheses refuted.
+
+  Notebook: https://app.datadoghq.com/notebook/13999109
+
+  What changed: Code review eliminated the two strongest candidates:
+
+  1. multiplayer_skip_connection_promise flag — REFUTED. Both code paths (old and new) call the same create_connection / destroy_connection logic. The flag is a latency
+  optimization that skips a TypeScript round-trip promise, not a resource management change. No leak mechanism exists in either path. The megaprocess also started climbing at 8
+  AM PT when the flag was only at 10%, further weakening this hypothesis.
+  2. get_dirty_documents() query limit removal — REFUTED. The LaunchDarkly flag was already set to 0 (unlimited) in production before the code was removed — the code change was
+  a no-op. The data structures are tiny (~50-100 bytes per entry) with bounded result sets.
+
+  New findings that reshape the picture:
+  - The megaprocess started climbing at 8 AM PT Wed Feb 18 — 8 hours before the container-level onset at 4 PM PT. This earlier timeline predates both the flag ramp and the
+  container metric divergence.
+  - Node.js heap dropped 87% (870 MB → 112 MB) post-Deploy 1, suggesting work may have shifted from Node to Rust, which complicates the baseline.
+
+  Remaining candidates:
+  - 236cb75 (reconnect metric change) — calls get_cached_changes_after_seqnum() even when journaled reconnect isn'\''t enabled, potentially cloning cached data unnecessarily
+  - multiplayer_rust_file_restore at 33% rollout — Rust file restore path may have different memory characteristics
+  - Other Deploy 1 Rust changes from the Feb 17 window
+
+  The investigation is at a pivot point. How would you like to proceed?
+  - Continue — keep the review loop going to investigate the remaining candidates
+  - Redirect — you have specific ideas about what to investigate
+  - Stop — publish as-is with root cause inconclusive
+
+  (Notebook writer idle — waiting for your direction before continuing.)' \
+  true
+
 # --- Summary ---
 
 echo ""

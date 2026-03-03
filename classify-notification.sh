@@ -41,8 +41,10 @@ SYSTEM_PROMPT='You classify Claude Code notification messages to decide if the u
 Respond with ONLY a JSON object (no markdown fences, no explanation):
 {"notify": true/false, "subtitle": "2-4 word label", "summary": "concise notification text"}
 
+IMPORTANT: If the message asks a question, presents options, or requests a decision, ALWAYS set notify=true regardless of other signals.
+
 NOTIFY = true when Claude:
-- Asks a question or needs the user to make a decision
+- Asks a question, presents options, or needs the user to make a decision (HIGHEST PRIORITY — overrides everything else)
 - Implemented or built something substantial (new feature, refactor, bug fix with code changes)
 - Encountered an error, failure, or problem that needs attention
 - Finished analysis, investigation, or research with results to share
@@ -51,7 +53,7 @@ NOTIFY = false when Claude:
 - Ran a routine git/CLI operation (committed, pushed, created a PR, merged, rebased)
 - Confirmed a trivial action (saved a file, deleted a file, ran a formatter)
 - Gave a brief status acknowledgment with no meaningful content
-- Is still working and waiting for sub-tasks/agents to complete (e.g. "waiting for agents", "running in parallel", "checking on results")
+- Is still working and waiting for sub-tasks/agents to complete with NO question asked (e.g. "launched 3 agents, waiting for results")
 
 For subtitle, use short labels like: "Question", "Feature Done", "Error Found", "Analysis Ready", "Bug Fixed", "Review Ready"
 For summary, write naturally and concisely. Describe the outcome or question directly. Do not start with "Claude".'
