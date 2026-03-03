@@ -4,13 +4,16 @@
 #
 # Usage: classify-notification.sh <transcript_path>
 # Output: JSON on stdout: {"notify": bool, "subtitle": "...", "summary": "..."}
+# Logs:   /tmp/claude-classify-debug.log
 
 set -euo pipefail
 
+DEBUG_LOG="/tmp/claude-classify-debug.log"
 DEFAULT='{"notify":true,"subtitle":"Needs Input","summary":"Awaiting your input"}'
 TRANSCRIPT_PATH="${1:-}"
 
 if [[ -z "$TRANSCRIPT_PATH" || ! -f "$TRANSCRIPT_PATH" ]]; then
+  echo "$(date -Iseconds) NO_TRANSCRIPT path=${TRANSCRIPT_PATH:-<empty>}" >> "$DEBUG_LOG"
   echo "$DEFAULT"
   exit 0
 fi
@@ -27,6 +30,7 @@ LAST_TEXT=$(tail -50 "$TRANSCRIPT_PATH" \
     ' 2>/dev/null)
 
 if [[ -z "$LAST_TEXT" ]]; then
+  echo "$(date -Iseconds) NO_TEXT transcript=$TRANSCRIPT_PATH" >> "$DEBUG_LOG"
   echo "$DEFAULT"
   exit 0
 fi
@@ -58,26 +62,36 @@ NOTIFY = false when Claude:
 For subtitle, use short labels like: "Question", "Feature Done", "Error Found", "Analysis Ready", "Bug Fixed", "Review Ready"
 For summary, write naturally and concisely. Describe the outcome or question directly. Do not start with "Claude".'
 
-DEBUG_LOG="/tmp/claude-classify-debug.log"
-
+STDERR_LOG=$(mktemp)
 CLASSIFICATION=$(printf '%s' "$LAST_TEXT" \
   | CLAUDECODE="" claude -p \
       --model haiku \
       --no-session-persistence \
       --tools "" \
       --system-prompt "$SYSTEM_PROMPT" \
-    2>"$DEBUG_LOG") || true
-
-echo "$(date -Iseconds) raw_output=$(printf '%s' "$CLASSIFICATION" | head -c 500)" >> "$DEBUG_LOG"
+    2>"$STDERR_LOG") || true
 
 # Strip markdown code fences if present
 CLASSIFICATION=$(echo "$CLASSIFICATION" | sed '/^```/d')
+
+# Log the full decision
+{
+  echo "$(date -Iseconds) === CLASSIFY ==="
+  echo "  message: ${LAST_TEXT:0:200}$([ ${#LAST_TEXT} -gt 200 ] && echo '...')"
+  if echo "$CLASSIFICATION" | jq -e 'has("notify")' >/dev/null 2>&1; then
+    echo "  result:  $(echo "$CLASSIFICATION" | jq -c '.')"
+    echo "  action:  $(echo "$CLASSIFICATION" | jq -r 'if .notify then "NOTIFY" else "SKIP" end')"
+  else
+    echo "  result:  <invalid json> $CLASSIFICATION"
+    echo "  stderr:  $(cat "$STDERR_LOG")"
+    echo "  action:  NOTIFY (fallback)"
+  fi
+} >> "$DEBUG_LOG"
+rm -f "$STDERR_LOG"
 
 # Validate the response is JSON with the required field
 if echo "$CLASSIFICATION" | jq -e 'has("notify")' >/dev/null 2>&1; then
   echo "$CLASSIFICATION" | jq -c '.'
 else
-  # Classification failed or returned invalid JSON — default to notifying
-  echo "$(date -Iseconds) FALLBACK jq_parse_failed" >> "$DEBUG_LOG"
   echo "$DEFAULT"
 fi
