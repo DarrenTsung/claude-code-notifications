@@ -62,21 +62,59 @@ NOTIFY = false when Claude:
 For subtitle, use short labels like: "Question", "Feature Done", "Error Found", "Analysis Ready", "Bug Fixed", "Review Ready"
 For summary, write naturally and concisely. Describe the outcome or question directly. Do not start with "Claude".'
 
+# Calls claude with the given model and writes the parsed classification to stdout.
+# Returns 0 if valid JSON, 1 otherwise. Logs stderr to the given file.
+classify_with_model() {
+  local model="$1"
+  local stderr_file="$2"
+  local raw
+  raw=$(printf '%s' "$LAST_TEXT" \
+    | CLAUDECODE="" claude -p \
+        --model "$model" \
+        --no-session-persistence \
+        --tools "" \
+        --system-prompt "$SYSTEM_PROMPT" \
+      2>"$stderr_file") || true
+  # Strip markdown code fences if present
+  raw=$(echo "$raw" | sed '/^```/d')
+  # Try parsing as-is first, then extract first JSON object if there's trailing text
+  local parsed
+  if parsed=$(echo "$raw" | jq -ce 'select(has("notify"))' 2>/dev/null); then
+    echo "$parsed"
+    return 0
+  elif parsed=$(echo "$raw" | grep -o '{[^}]*}' | head -1 | jq -ce 'select(has("notify"))' 2>/dev/null); then
+    echo "$parsed"
+    return 0
+  else
+    echo "$raw"
+    return 1
+  fi
+}
+
 STDERR_LOG=$(mktemp)
-CLASSIFICATION=$(printf '%s' "$LAST_TEXT" \
-  | CLAUDECODE="" claude -p \
-      --model haiku \
-      --no-session-persistence \
-      --tools "" \
-      --system-prompt "$SYSTEM_PROMPT" \
-    2>"$STDERR_LOG") || true
+CLASSIFICATION=""
+USED_MODEL="haiku"
 
-# Strip markdown code fences if present
-CLASSIFICATION=$(echo "$CLASSIFICATION" | sed '/^```/d')
+if CLASSIFICATION=$(classify_with_model haiku "$STDERR_LOG"); then
+  : # Haiku succeeded
+else
+  # Log the Haiku failure, then retry with Sonnet
+  {
+    echo "$(date -Iseconds) === CLASSIFY (haiku failed, retrying with sonnet) ==="
+    echo "  message: ${LAST_TEXT:0:200}$([ ${#LAST_TEXT} -gt 200 ] && echo '...')"
+    echo "  haiku_result: <invalid> $CLASSIFICATION"
+    echo "  haiku_stderr: $(cat "$STDERR_LOG")"
+  } >> "$DEBUG_LOG"
 
-# Log the full decision
+  USED_MODEL="sonnet (retry)"
+  if ! CLASSIFICATION=$(classify_with_model sonnet "$STDERR_LOG"); then
+    USED_MODEL="sonnet (retry, also failed)"
+  fi
+fi
+
+# Log the final decision
 {
-  echo "$(date -Iseconds) === CLASSIFY ==="
+  echo "$(date -Iseconds) === CLASSIFY ($USED_MODEL) ==="
   echo "  message: ${LAST_TEXT:0:200}$([ ${#LAST_TEXT} -gt 200 ] && echo '...')"
   if echo "$CLASSIFICATION" | jq -e 'has("notify")' >/dev/null 2>&1; then
     echo "  result:  $(echo "$CLASSIFICATION" | jq -c '.')"
@@ -89,7 +127,7 @@ CLASSIFICATION=$(echo "$CLASSIFICATION" | sed '/^```/d')
 } >> "$DEBUG_LOG"
 rm -f "$STDERR_LOG"
 
-# Validate the response is JSON with the required field
+# Output valid classification or fall back to default
 if echo "$CLASSIFICATION" | jq -e 'has("notify")' >/dev/null 2>&1; then
   echo "$CLASSIFICATION" | jq -c '.'
 else

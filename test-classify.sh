@@ -93,7 +93,7 @@ classify "Needs a decision" \
 
 classify "Implemented a feature" \
   'I'\''ve implemented the user authentication system. The changes include a new JWT middleware, login/logout endpoints, and a refresh token flow. The middleware validates tokens on every request and returns 401 for expired sessions.' \
-  true
+  false
 
 classify "Found a bug" \
   'I found the issue — there'\''s a race condition in the connection pool. When two requests arrive simultaneously, they can both grab the same connection because the lock is released between the check and the acquire. I'\''ve added a mutex to fix this.' \
@@ -133,6 +133,24 @@ classify "Investigation with options to choose" \
 
   (Notebook writer idle — waiting for your direction before continuing.)' \
   true
+
+# --- Edge cases: short/ambiguous messages that previously broke Haiku ---
+
+classify "Short acknowledgment - Got it" \
+  'Got it!' \
+  false
+
+classify "Short acknowledgment - Done" \
+  'Done!' \
+  false
+
+classify "Short acknowledgment - OK" \
+  'OK, sounds good.' \
+  false
+
+classify "Review complete, no question" \
+  'All reviewers have shut down. The full review summary is above — let me know if you have any questions about the PR or want to dig into anything specific.' \
+  false
 
 # --- Summary ---
 

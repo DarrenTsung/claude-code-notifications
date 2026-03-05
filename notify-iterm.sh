@@ -89,16 +89,19 @@ case "$NOTIFICATION_TYPE" in
       RESULT=$("$CLASSIFY_SCRIPT" "$TRANSCRIPT_PATH")
       SHOULD_NOTIFY=$(echo "$RESULT" | jq -r '.notify')
       if [[ "$SHOULD_NOTIFY" == "false" ]]; then
-        echo "$(date -Iseconds) SKIPPED idle_prompt (classified as routine)" >> /tmp/claude-notify-debug.log
+        echo "$(date -Iseconds) SKIPPED idle_prompt (classified as routine) result=$(echo "$RESULT" | jq -c '.')" >> /tmp/claude-notify-debug.log
         exit 0
       fi
       SUBTITLE=$(echo "$RESULT" | jq -r '.subtitle // "Needs Input"')
       SUMMARY=$(echo "$RESULT" | jq -r '.summary // "Awaiting your input"')
+      CLASSIFY_SOURCE="classified"
     else
       SUBTITLE="Needs Input"
       SUMMARY="${MESSAGE:-Awaiting your input}"
+      CLASSIFY_SOURCE="no-classifier"
     fi
 
+    echo "$(date -Iseconds) SENT idle_prompt ($CLASSIFY_SOURCE) subtitle=\"$SUBTITLE\" message=\"$SUMMARY\"" >> /tmp/claude-notify-debug.log
     terminal-notifier \
       -title "$TITLE" \
       -subtitle "$SUBTITLE" \
