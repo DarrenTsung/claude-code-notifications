@@ -79,6 +79,20 @@ if [[ -n "$SESSION_ID" ]]; then
   fi
 fi
 
+# Dedup: skip if we already sent this exact notification for this session.
+# Uses a per-session file storing the hash of the last notification payload.
+# The hash covers notification_type + message so re-emits (e.g. from terminal
+# redraws) are suppressed, but genuinely new notifications still go through.
+SESSION_HASH_ID="${SESSION_ID:-unknown}"
+SESSION_HASH_ID="${SESSION_HASH_ID##*:}"
+DEDUP_FILE="/tmp/claude-notify-dedup-${SESSION_HASH_ID}"
+DEDUP_KEY=$(printf '%s\n%s' "$NOTIFICATION_TYPE" "$MESSAGE" | shasum -a 256 | cut -d' ' -f1)
+
+if [[ -f "$DEDUP_FILE" ]] && [[ "$(cat "$DEDUP_FILE")" == "$DEDUP_KEY" ]]; then
+  echo "$(date -Iseconds) DEDUP $NOTIFICATION_TYPE (already sent for this session)" >> /tmp/claude-notify-debug.log
+  exit 0
+fi
+
 case "$NOTIFICATION_TYPE" in
   "idle_prompt")
     # Classify the last assistant message to decide if notification is warranted
@@ -90,6 +104,8 @@ case "$NOTIFICATION_TYPE" in
       SHOULD_NOTIFY=$(echo "$RESULT" | jq -r '.notify')
       if [[ "$SHOULD_NOTIFY" == "false" ]]; then
         echo "$(date -Iseconds) SKIPPED idle_prompt (classified as routine) result=$(echo "$RESULT" | jq -c '.')" >> /tmp/claude-notify-debug.log
+        # Still record in dedup so we don't re-classify on redraw
+        echo "$DEDUP_KEY" > "$DEDUP_FILE"
         exit 0
       fi
       SUBTITLE=$(echo "$RESULT" | jq -r '.subtitle // "Needs Input"')
@@ -102,6 +118,7 @@ case "$NOTIFICATION_TYPE" in
     fi
 
     echo "$(date -Iseconds) SENT idle_prompt ($CLASSIFY_SOURCE) subtitle=\"$SUBTITLE\" message=\"$SUMMARY\"" >> /tmp/claude-notify-debug.log
+    echo "$DEDUP_KEY" > "$DEDUP_FILE"
     terminal-notifier \
       -title "$TITLE" \
       -subtitle "$SUBTITLE" \
@@ -111,6 +128,7 @@ case "$NOTIFICATION_TYPE" in
     ;;
   "tool_complete"|"agent_complete")
     # Task completed
+    echo "$DEDUP_KEY" > "$DEDUP_FILE"
     terminal-notifier \
       -title "$TITLE" \
       -subtitle "Done" \
@@ -124,6 +142,7 @@ case "$NOTIFICATION_TYPE" in
     else
       SUBTITLE="Permission Needed"
     fi
+    echo "$DEDUP_KEY" > "$DEDUP_FILE"
     terminal-notifier \
       -title "$TITLE" \
       -subtitle "$SUBTITLE" \
@@ -133,6 +152,7 @@ case "$NOTIFICATION_TYPE" in
     ;;
   *)
     # Default/unknown notification
+    echo "$DEDUP_KEY" > "$DEDUP_FILE"
     terminal-notifier \
       -title "$TITLE" \
       -message "${MESSAGE:-Notification}" \

@@ -28,3 +28,7 @@ IS_FOCUSED=$(osascript -e "
 
 # Record focus state and timestamp
 echo "${IS_FOCUSED:-false} $(date +%s)" > "$STATE_FILE"
+
+# Clear notification dedup — user has responded, so the next notification
+# (even with the same content) is a genuinely new event.
+rm -f "/tmp/claude-notify-dedup-$UUID"
