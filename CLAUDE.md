@@ -13,8 +13,17 @@ Two terminal variants are supported:
 ## How it works
 
 1. **Focus tracking** (`track-user-focus*.sh`): Runs on prompt submit (via Claude Code hooks) to record whether the user was looking at the terminal. Writes focus state + timestamp to `/tmp/claude-focus-*`.
-2. **Notification** (`notify*.sh`): Runs on Claude Code notification/permission events. Reads JSON from stdin (`notification_type`, `message`), checks if the terminal is currently focused, and sends a `terminal-notifier` notification if not. Clicking the notification runs the activate script.
+2. **Notification** (`notify*.sh`): Runs on Claude Code `Notification` events (and, for the iTerm variant, `PermissionRequest` events). Reads JSON from stdin (`notification_type`, `message`, etc.), checks if the terminal is currently focused, and sends a `terminal-notifier` notification if not. Clicking the notification runs the activate script.
 3. **Activation** (`activate-*-session.sh`): Brings the correct terminal window/session to the foreground when the user clicks a notification.
+
+### Memory-write approvals (iTerm)
+
+Memory saves use the `memory` tool and are normally auto-allowed, so they fire no `Notification`. To surface the rare case where a memory write *needs approval*, `notify-iterm.sh` is also wired to `PermissionRequest`:
+
+- A `PermissionRequest` for `tool_name == "memory"` drops a short-lived marker at `/tmp/claude-notify-mem-<session_id>` describing the op (it does **not** notify — that would fire on every memory write).
+- The follow-up generic `permission_prompt` `Notification` checks for a *fresh* marker (≤10s old) and, if found, labels the notification **Memory** with the op details instead of the generic "Permission Needed".
+
+This means a memory notification fires *only when approval is actually needed*. Caveat: because `PermissionRequest` also fires for auto-allowed memory writes, an unrelated permission prompt that happens within 10s of a memory write could be mislabeled "Memory" (cosmetic only — the notification and click-to-activate still work correctly).
 
 ## Installation
 
@@ -28,12 +37,22 @@ Two terminal variants are supported:
 
 ## Notification types and sounds
 
-| `notification_type`              | Subtitle           | Sound |
-|----------------------------------|--------------------| ------|
-| `idle_prompt`                    | Needs Input        | Blow  |
-| `tool_complete` / `agent_complete` | Done            | Glass |
-| `permission_prompt`              | Permission Needed (or "Plan Ready" if message contains "plan", iTerm only) | Basso |
-| unknown/default                  | *(none)*           | Pop   |
+The live `notification_type` enum emitted by Claude Code (from the CLI's
+`Notification` hook `matcherMetadata`) is exactly: `permission_prompt`,
+`idle_prompt`, `auth_success`, `elicitation_dialog`, `elicitation_complete`,
+`elicitation_response`. Memory saves are autonomous (the `memory` tool writes
+files directly) and do **not** emit a `Notification` event — they only surface
+as a `permission_prompt` if the write isn't auto-allowed.
+
+| `notification_type`              | Subtitle           | Sound | Notes |
+|----------------------------------|--------------------|-------|-------|
+| `idle_prompt`                    | *(classified)*     | Blow  | Routed through `classify-notification.sh`; routine pauses are suppressed |
+| `elicitation_dialog`             | Needs Input        | Blow  | MCP/interactive tool opened an input form and is blocked |
+| `permission_prompt`              | Permission Needed (or "Plan Ready" if message contains "plan", iTerm only) | Basso | |
+| `skill_edit`                     | Skill Edit         | Funk  | Synthesized from a `PermissionRequest` Edit/Write under `/skills/` (requires the hook to be registered for `PermissionRequest`) |
+| `auth_success` / `elicitation_complete` / `elicitation_response` | — | — | Suppressed: observability-only, no user action needed |
+| `tool_complete` / `agent_complete` | Done             | Glass | Legacy/unused — not emitted by current Claude Code |
+| unknown/default                  | *(none)*           | Pop   | Fallback for any future type |
 
 ## Debug logging
 

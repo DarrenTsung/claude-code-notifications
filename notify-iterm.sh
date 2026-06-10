@@ -13,10 +13,34 @@ HOOK_EVENT=$(echo "$INPUT" | jq -r '.hook_event_name // ""')
 NOTIFICATION_TYPE=$(echo "$INPUT" | jq -r '.notification_type // "unknown"')
 MESSAGE=$(echo "$INPUT" | jq -r '.message // ""')
 
-# Skip PermissionRequest events — Claude Code always follows them with a
+# For PermissionRequest events, only send a notification if it's a skill edit.
+# Other PermissionRequests are skipped — Claude Code follows them with a
 # Notification event that has proper notification_type and message.
 if [[ "$HOOK_EVENT" == "PermissionRequest" ]]; then
-  exit 0
+  TOOL_NAME=$(echo "$INPUT" | jq -r '.tool_name // ""')
+  FILE_PATH=$(echo "$INPUT" | jq -r '.tool_input.file_path // ""')
+  if [[ ("$TOOL_NAME" == "Edit" || "$TOOL_NAME" == "Write") && "$FILE_PATH" == *"/skills/"* ]]; then
+    NOTIFICATION_TYPE="skill_edit"
+    MESSAGE="$TOOL_NAME: ${FILE_PATH##*/skills/}"
+  elif [[ "$TOOL_NAME" == "memory" ]]; then
+    # Memory writes are normally auto-allowed and fire NO Notification. When one
+    # genuinely needs approval, Claude Code follows this PermissionRequest with a
+    # generic `permission_prompt` Notification. We don't notify here (that would
+    # fire on every memory write); instead we drop a short-lived marker describing
+    # the op. The permission_prompt handler below labels its notification "Memory"
+    # iff a *fresh* marker exists — so we only ever notify when approval is actually
+    # needed. If the write is auto-allowed, no permission_prompt follows and the
+    # marker simply expires unused.
+    CLAUDE_SESSION=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+    MEM_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
+    MEM_PATH=$(echo "$INPUT" | jq -r '.tool_input.path // ""')
+    MEM_DESC="${MEM_CMD:-write}${MEM_PATH:+ ${MEM_PATH##*/}}"
+    printf '%s' "$MEM_DESC" > "/tmp/claude-notify-mem-${CLAUDE_SESSION}"
+    echo "$(date -Iseconds) MEMORY PermissionRequest marker: $MEM_DESC" >> /tmp/claude-notify-debug.log
+    exit 0
+  else
+    exit 0
+  fi
 fi
 
 # Get iTerm session ID from environment for click-to-activate
@@ -126,8 +150,33 @@ case "$NOTIFICATION_TYPE" in
       -sound Blow \
       -execute "$ACTIVATE_SCRIPT $SESSION_ID"
     ;;
+  "elicitation_dialog")
+    # An MCP server (or interactive tool) has opened an input form and is
+    # blocked waiting on you. This is the newest "needs your attention" type —
+    # treat it like idle_prompt but without the classifier (an open form always
+    # warrants a ping).
+    echo "$DEDUP_KEY" > "$DEDUP_FILE"
+    echo "$(date -Iseconds) SENT elicitation_dialog message=\"$MESSAGE\"" >> /tmp/claude-notify-debug.log
+    terminal-notifier \
+      -title "$TITLE" \
+      -subtitle "Needs Input" \
+      -message "${MESSAGE:-Claude needs your input}" \
+      -sound Blow \
+      -execute "$ACTIVATE_SCRIPT $SESSION_ID"
+    ;;
+  "elicitation_complete"|"elicitation_response"|"auth_success")
+    # Observability-only events: an elicitation form was submitted/resolved, or
+    # login succeeded. No user action is required, so suppress them — otherwise
+    # they fall through to the default case and fire a noisy notification.
+    # (Record in dedup so a terminal redraw doesn't re-trigger anything.)
+    echo "$DEDUP_KEY" > "$DEDUP_FILE"
+    echo "$(date -Iseconds) SKIPPED $NOTIFICATION_TYPE (observability-only, no action needed)" >> /tmp/claude-notify-debug.log
+    exit 0
+    ;;
   "tool_complete"|"agent_complete")
-    # Task completed
+    # NOTE: these are NOT emitted by current Claude Code (the live notification_type
+    # enum is permission_prompt/idle_prompt/auth_success/elicitation_*). Kept as a
+    # harmless legacy branch in case an older client or the SDK emits them.
     echo "$DEDUP_KEY" > "$DEDUP_FILE"
     terminal-notifier \
       -title "$TITLE" \
@@ -136,13 +185,39 @@ case "$NOTIFICATION_TYPE" in
       -sound Glass \
       -execute "$ACTIVATE_SCRIPT $SESSION_ID"
     ;;
+  "skill_edit")
+    echo "$DEDUP_KEY" > "$DEDUP_FILE"
+    terminal-notifier \
+      -title "$TITLE" \
+      -subtitle "Skill Edit" \
+      -message "${MESSAGE}" \
+      -sound Funk \
+      -execute "$ACTIVATE_SCRIPT $SESSION_ID"
+    ;;
   "permission_prompt")
-    if [[ "$MESSAGE" == *"plan"* ]]; then
-      SUBTITLE="Plan Ready"
-    else
-      SUBTITLE="Permission Needed"
+    # If a memory PermissionRequest fired moments ago (see the PermissionRequest
+    # branch above), this prompt is the memory write asking for approval — label it.
+    CLAUDE_SESSION=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+    MEM_MARKER="/tmp/claude-notify-mem-${CLAUDE_SESSION}"
+    MEM_LABELLED=false
+    if [[ -f "$MEM_MARKER" ]]; then
+      MARKER_AGE=$(( $(date +%s) - $(stat -f %m "$MEM_MARKER" 2>/dev/null || echo 0) ))
+      if (( MARKER_AGE <= 10 )); then
+        SUBTITLE="Memory"
+        MESSAGE="Memory write needs approval: $(cat "$MEM_MARKER")"
+        MEM_LABELLED=true
+      fi
+      rm -f "$MEM_MARKER"
+    fi
+    if [[ "$MEM_LABELLED" != "true" ]]; then
+      if [[ "$MESSAGE" == *"plan"* ]]; then
+        SUBTITLE="Plan Ready"
+      else
+        SUBTITLE="Permission Needed"
+      fi
     fi
     echo "$DEDUP_KEY" > "$DEDUP_FILE"
+    echo "$(date -Iseconds) SENT permission_prompt subtitle=\"$SUBTITLE\"" >> /tmp/claude-notify-debug.log
     terminal-notifier \
       -title "$TITLE" \
       -subtitle "$SUBTITLE" \
