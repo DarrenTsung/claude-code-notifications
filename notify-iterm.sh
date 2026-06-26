@@ -103,18 +103,28 @@ if [[ -n "$SESSION_ID" ]]; then
   fi
 fi
 
-# Dedup: skip if we already sent this exact notification for this session.
-# Uses a per-session file storing the hash of the last notification payload.
-# The hash covers notification_type + message so re-emits (e.g. from terminal
-# redraws) are suppressed, but genuinely new notifications still go through.
+# Dedup: skip if we already sent this exact notification for this session
+# *within the last DEDUP_WINDOW seconds*. Uses a per-session file storing the
+# hash of the last notification payload. The hash covers notification_type +
+# message, so terminal-redraw re-emits (which arrive within a second or two of
+# the original) are suppressed. The time window is essential: permission and
+# idle prompts carry a constant message ("Claude needs your permission" /
+# "Claude is waiting for your input"), so without it the *first* prompt in a
+# session would suppress every later one with the same key for the whole
+# session. Beyond the window, an identical key is treated as a genuinely new
+# notification.
 SESSION_HASH_ID="${SESSION_ID:-unknown}"
 SESSION_HASH_ID="${SESSION_HASH_ID##*:}"
 DEDUP_FILE="/tmp/claude-notify-dedup-${SESSION_HASH_ID}"
 DEDUP_KEY=$(printf '%s\n%s' "$NOTIFICATION_TYPE" "$MESSAGE" | shasum -a 256 | cut -d' ' -f1)
+DEDUP_WINDOW=10
 
 if [[ -f "$DEDUP_FILE" ]] && [[ "$(cat "$DEDUP_FILE")" == "$DEDUP_KEY" ]]; then
-  echo "$(date -Iseconds) DEDUP $NOTIFICATION_TYPE (already sent for this session)" >> /tmp/claude-notify-debug.log
-  exit 0
+  DEDUP_AGE=$(( $(date +%s) - $(stat -f %m "$DEDUP_FILE" 2>/dev/null || echo 0) ))
+  if (( DEDUP_AGE <= DEDUP_WINDOW )); then
+    echo "$(date -Iseconds) DEDUP $NOTIFICATION_TYPE (re-emit within ${DEDUP_WINDOW}s)" >> /tmp/claude-notify-debug.log
+    exit 0
+  fi
 fi
 
 case "$NOTIFICATION_TYPE" in
