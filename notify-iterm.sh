@@ -38,6 +38,29 @@ if [[ "$HOOK_EVENT" == "PermissionRequest" ]]; then
     printf '%s' "$MEM_DESC" > "/tmp/claude-notify-mem-${CLAUDE_SESSION}"
     echo "$(date -Iseconds) MEMORY PermissionRequest marker: $MEM_DESC" >> /tmp/claude-notify-debug.log
     exit 0
+  elif [[ "$TOOL_NAME" == "Bash" ]]; then
+    # A Bash command reached the permission engine, which means the PreToolUse
+    # approve-hook did NOT auto-approve it (it auto-allows ~98% of commands, and
+    # an "allow" decision fires no PermissionRequest). So a Bash PermissionRequest
+    # means manual approval is genuinely needed — e.g. Claude flagged command
+    # substitution `$(...)` / backticks, which it forces a prompt for even when a
+    # hook or rule would otherwise allow the command. The follow-up
+    # `permission_prompt` Notification is unreliable for these (often never
+    # emitted), so notify here off the deterministic PermissionRequest. Drop a
+    # short-lived marker so that if the follow-up Notification *does* fire, the
+    # permission_prompt handler below skips it instead of double-notifying.
+    CLAUDE_SESSION=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+    touch "/tmp/claude-notify-permreq-${CLAUDE_SESSION}"
+    BASH_DESC=$(echo "$INPUT" | jq -r '.tool_input.description // ""')
+    if [[ -n "$BASH_DESC" ]]; then
+      MESSAGE="Approve: $BASH_DESC"
+    else
+      BASH_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
+      BASH_FIRST=$(printf '%s\n' "$BASH_CMD" | grep -vE '^[[:space:]]*(#|$)' | head -1)
+      MESSAGE="Approve: ${BASH_FIRST:0:100}"
+    fi
+    NOTIFICATION_TYPE="permission_prompt"
+    # fall through to the focus/dedup checks and the permission_prompt case below
   else
     exit 0
   fi
@@ -208,6 +231,18 @@ case "$NOTIFICATION_TYPE" in
     # If a memory PermissionRequest fired moments ago (see the PermissionRequest
     # branch above), this prompt is the memory write asking for approval — label it.
     CLAUDE_SESSION=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
+    # If we already notified off the Bash PermissionRequest moments ago (see the
+    # Bash branch above), this is the redundant follow-up Notification — skip it.
+    PERMREQ_MARKER="/tmp/claude-notify-permreq-${CLAUDE_SESSION}"
+    if [[ -f "$PERMREQ_MARKER" ]] && [[ "$HOOK_EVENT" == "Notification" ]]; then
+      MARKER_AGE=$(( $(date +%s) - $(stat -f %m "$PERMREQ_MARKER" 2>/dev/null || echo 0) ))
+      rm -f "$PERMREQ_MARKER"
+      if (( MARKER_AGE <= 15 )); then
+        echo "$DEDUP_KEY" > "$DEDUP_FILE"
+        echo "$(date -Iseconds) SKIPPED permission_prompt (already notified via PermissionRequest)" >> /tmp/claude-notify-debug.log
+        exit 0
+      fi
+    fi
     MEM_MARKER="/tmp/claude-notify-mem-${CLAUDE_SESSION}"
     MEM_LABELLED=false
     if [[ -f "$MEM_MARKER" ]]; then
