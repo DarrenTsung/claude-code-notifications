@@ -18,9 +18,9 @@ Two terminal variants are supported:
 
 ### Memory-write approvals (iTerm)
 
-Memory saves use the `memory` tool and are normally auto-allowed, so they fire no `Notification`. To surface the rare case where a memory write *needs approval*, `notify-iterm.sh` is also wired to `PermissionRequest`:
+Memory is saved two ways: the native `memory` tool, or — as this setup uses — **file-based memory**, written as `Edit`/`Write` to `…/memory/*.md` files (one file per fact, plus a `MEMORY.md` index). Either way we do **not** want a notification on the write itself (that fires on every autonomous save). We only want one when a memory write *needs approval*. `notify-iterm.sh` is wired to `PermissionRequest` to do this:
 
-- A `PermissionRequest` for `tool_name == "memory"` drops a short-lived marker at `/tmp/claude-notify-mem-<session_id>` describing the op (it does **not** notify — that would fire on every memory write).
+- A `PermissionRequest` for `tool_name == "memory"` **or** an `Edit`/`Write` whose `file_path` matches `…/memory/*.md` drops a short-lived marker at `/tmp/claude-notify-mem-<session_id>` describing the op (it does **not** notify — that would fire on every memory write).
 - The follow-up generic `permission_prompt` `Notification` checks for a *fresh* marker (≤10s old) and, if found, labels the notification **Memory** with the op details instead of the generic "Permission Needed".
 
 This means a memory notification fires *only when approval is actually needed*. Caveat: because `PermissionRequest` also fires for auto-allowed memory writes, an unrelated permission prompt that happens within 10s of a memory write could be mislabeled "Memory" (cosmetic only — the notification and click-to-activate still work correctly).
@@ -40,9 +40,10 @@ This means a memory notification fires *only when approval is actually needed*. 
 The live `notification_type` enum emitted by Claude Code (from the CLI's
 `Notification` hook `matcherMetadata`) is exactly: `permission_prompt`,
 `idle_prompt`, `auth_success`, `elicitation_dialog`, `elicitation_complete`,
-`elicitation_response`. Memory saves are autonomous (the `memory` tool writes
-files directly) and do **not** emit a `Notification` event — they only surface
-as a `permission_prompt` if the write isn't auto-allowed.
+`elicitation_response`. Memory saves (native `memory` tool, or file-based
+`Edit`/`Write` to `…/memory/*.md`) do **not** emit a `Notification` of their own —
+they only surface as a `permission_prompt` when the write needs approval, which
+the hook then labels "Memory" (see Memory-write approvals above).
 
 | `notification_type`              | Subtitle           | Sound | Notes |
 |----------------------------------|--------------------|-------|-------|

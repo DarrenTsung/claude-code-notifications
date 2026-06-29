@@ -22,19 +22,25 @@ if [[ "$HOOK_EVENT" == "PermissionRequest" ]]; then
   if [[ ("$TOOL_NAME" == "Edit" || "$TOOL_NAME" == "Write") && "$FILE_PATH" == *"/skills/"* ]]; then
     NOTIFICATION_TYPE="skill_edit"
     MESSAGE="$TOOL_NAME: ${FILE_PATH##*/skills/}"
-  elif [[ "$TOOL_NAME" == "memory" ]]; then
-    # Memory writes are normally auto-allowed and fire NO Notification. When one
-    # genuinely needs approval, Claude Code follows this PermissionRequest with a
-    # generic `permission_prompt` Notification. We don't notify here (that would
-    # fire on every memory write); instead we drop a short-lived marker describing
-    # the op. The permission_prompt handler below labels its notification "Memory"
-    # iff a *fresh* marker exists — so we only ever notify when approval is actually
-    # needed. If the write is auto-allowed, no permission_prompt follows and the
+  elif [[ "$TOOL_NAME" == "memory" || ( ("$TOOL_NAME" == "Edit" || "$TOOL_NAME" == "Write") && "$FILE_PATH" == *"/memory/"*".md" ) ]]; then
+    # Memory writes — either the native `memory` tool or file-based Edit/Write to a
+    # `…/memory/*.md` file (one file per fact, plus a MEMORY.md index). We do NOT
+    # notify on the write itself — that would fire on every autonomous save, which
+    # is exactly what we want to avoid. Instead drop a short-lived marker describing
+    # the op and exit silently. When a memory write genuinely needs approval, Claude
+    # follows this PermissionRequest with a `permission_prompt` Notification; the
+    # permission_prompt handler below sees the fresh marker and labels that
+    # notification "Memory". So a memory notification fires ONLY when your approval
+    # is actually required. An auto-allowed write fires no follow-up prompt and the
     # marker simply expires unused.
     CLAUDE_SESSION=$(echo "$INPUT" | jq -r '.session_id // "unknown"')
-    MEM_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
-    MEM_PATH=$(echo "$INPUT" | jq -r '.tool_input.path // ""')
-    MEM_DESC="${MEM_CMD:-write}${MEM_PATH:+ ${MEM_PATH##*/}}"
+    if [[ "$TOOL_NAME" == "memory" ]]; then
+      MEM_CMD=$(echo "$INPUT" | jq -r '.tool_input.command // ""')
+      MEM_PATH=$(echo "$INPUT" | jq -r '.tool_input.path // ""')
+      MEM_DESC="${MEM_CMD:-write}${MEM_PATH:+ ${MEM_PATH##*/}}"
+    else
+      MEM_DESC="${FILE_PATH##*/}"
+    fi
     printf '%s' "$MEM_DESC" > "/tmp/claude-notify-mem-${CLAUDE_SESSION}"
     echo "$(date -Iseconds) MEMORY PermissionRequest marker: $MEM_DESC" >> /tmp/claude-notify-debug.log
     exit 0
